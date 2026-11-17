@@ -148,7 +148,7 @@ pub struct Part {
 impl Part {
     /// computes the part for `value`
     ///
-    /// the digest is `HMAC-SHA256(key, "keyed-hwid/v1" 0x00 kind 0x00 label 0x00 value)` 
+    /// the digest is `HMAC-SHA256(key, "keyed-hwid/v1" 0x00 kind 0x00 label 0x00 value)`
     /// truncated to [`DIGEST_LEN`] bytes
     pub fn new(
         key: &HwidKey,

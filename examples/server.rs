@@ -79,6 +79,7 @@ impl Server {
             unit: "os".into(),
             version: version.into(),
             hwid: Some(hwid),
+            seq: None,
         };
         match judge(&self.history, &report, &self.rules) {
             Some(signal) => println!("  flagged: {}", signal.as_str()),

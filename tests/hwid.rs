@@ -37,7 +37,13 @@ fn report(at: i64, version: &str, hwid: Hwid) -> Report {
         unit: "os".into(),
         version: version.into(),
         hwid: Some(hwid),
+        seq: None,
     }
+}
+
+fn with_seq(mut r: Report, seq: u64) -> Report {
+    r.seq = Some(seq);
+    r
 }
 
 fn part(key: &HwidKey, kind: Kind, label: &str, value: &str) -> Part {
@@ -236,5 +242,135 @@ fn serde_uses_base64_digests() {
             r#"{"hardware":[{"label":"soc","digest":"AAAA"}],"place":[]}"#
         )
         .is_err()
+    );
+}
+
+#[test]
+fn forked_tokens_are_flagged_even_for_exact_replays() {
+    let rules = Rules::default();
+    let original = with_seq(report(T0, "1.7.0", hwid(&HW_A, &HOME)), 41);
+    let next = with_seq(report(T0 + 60, "1.7.0", hwid(&HW_A, &HOME)), 42);
+    assert_eq!(judge(std::slice::from_ref(&original), &next, &rules), None);
+
+    // a clone replays the original's digests but holds the token the original already used
+    let replay = with_seq(report(T0 + 120, "1.7.0", hwid(&HW_A, &HOME)), 42);
+    assert_eq!(
+        judge(&[next, original], &replay, &rules),
+        Some(Signal::Forked)
+    );
+}
+
+#[test]
+fn withheld_hardware_is_flagged() {
+    let rules = Rules::default();
+    let before = report(T0, "1.7.0", hwid(&HW_A, &HOME));
+    let empty = report(T0 + 60, "1.7.0", hwid(&[], &HOME));
+    let one = report(T0 + 60, "1.7.0", hwid(&HW_A[..1], &HOME));
+    assert_eq!(
+        judge(std::slice::from_ref(&before), &empty, &rules),
+        Some(Signal::Withheld)
+    );
+    assert_eq!(
+        judge(std::slice::from_ref(&before), &one, &rules),
+        Some(Signal::Withheld)
+    );
+
+    // a device that only ever reads one part is fine
+    let single = report(T0, "1.7.0", hwid(&HW_A[..1], &HOME));
+    assert_eq!(judge(&[single], &one, &rules), None);
+}
+
+#[test]
+fn anchors_must_match() {
+    let rules = Rules {
+        anchors: vec!["tpm_ek".into()],
+        ..Rules::default()
+    };
+    let hw = [("soc", "1"), ("emmc", "2"), ("tpm_ek", "ek-a")];
+    let spoofed = [("soc", "1"), ("emmc", "2"), ("tpm_ek", "ek-b")];
+    let before = report(T0, "1.7.0", hwid(&hw, &HOME));
+    let after = report(T0 + 60, "1.7.0", hwid(&spoofed, &HOME));
+    assert_eq!(
+        judge(std::slice::from_ref(&before), &after, &Rules::default()),
+        None
+    );
+    assert_eq!(
+        judge(std::slice::from_ref(&before), &after, &rules),
+        Some(Signal::TwoDevices)
+    );
+
+    // a missing anchor is not a contradiction
+    let no_tpm = report(T0 + 60, "1.7.0", hwid(&hw[..2], &HOME));
+    assert_eq!(judge(&[before], &no_tpm, &rules), None);
+}
+
+#[test]
+fn rotating_machines_beyond_the_window_is_flagged() {
+    let rules = Rules::default();
+    let machine = |n: &'static str| [("soc", n), ("emmc", n), ("se", n)];
+    let reports: Vec<Report> = ["a", "b", "c"]
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            report(
+                T0 + i as i64 * 2 * 86_400,
+                "1.7.0",
+                hwid(&machine(n), &HOME),
+            )
+        })
+        .rev()
+        .collect();
+    let third = report(T0 + 6 * 86_400, "1.7.0", hwid(&machine("c"), &HOME));
+    assert_eq!(judge(&reports[1..], &reports[0], &rules), None);
+    assert_eq!(judge(&reports, &third, &rules), None);
+    let fourth = report(T0 + 6 * 86_400, "1.7.0", hwid(&machine("d"), &HOME));
+    assert_eq!(
+        judge(&reports, &fourth, &rules),
+        Some(Signal::HardwareChurn)
+    );
+    let much_later = report(T0 + 60 * 86_400, "1.7.0", hwid(&machine("d"), &HOME));
+    assert_eq!(judge(&reports, &much_later, &rules), None);
+}
+
+#[test]
+fn serials_and_uuids_drop_placeholders() {
+    assert_eq!(normalize::serial("To be filled by O.E.M."), None);
+    assert_eq!(normalize::serial(" Default string\0"), None);
+    assert_eq!(normalize::serial("XXXXXXXXXX"), None);
+    assert_eq!(normalize::serial("PF3ABCDE").as_deref(), Some("pf3abcde"));
+
+    assert_eq!(
+        normalize::uuid("{4C4C4544-0042-3510-8052-B4C04F4E3732}").as_deref(),
+        Some("4c4c4544-0042-3510-8052-b4c04f4e3732")
+    );
+    assert_eq!(
+        normalize::uuid("03000200-0400-0500-0006-000700080009"),
+        None
+    );
+    assert_eq!(
+        normalize::uuid("00000000-0000-0000-0000-000000000000"),
+        None
+    );
+    assert_eq!(
+        normalize::uuid("FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"),
+        None
+    );
+    assert_eq!(normalize::uuid("not-a-uuid"), None);
+}
+
+#[test]
+fn alternating_machines_beyond_the_window_is_flagged() {
+    let rules = Rules::default();
+    let a = report(T0, "1.7.0", hwid(&HW_A, &HOME));
+    let b = report(
+        T0 + 2 * 86_400,
+        "1.7.0",
+        hwid(&[("soc", "7"), ("emmc", "8"), ("se", "9")], &HOME),
+    );
+    let a_again = report(T0 + 4 * 86_400, "1.7.0", hwid(&HW_A, &HOME));
+    assert_eq!(judge(std::slice::from_ref(&a), &b, &rules), None);
+    assert_eq!(
+        judge(&[b, a], &a_again, &rules),
+        Some(Signal::HardwareChurn)
     );
 }

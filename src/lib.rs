@@ -2,7 +2,7 @@
 //!
 //! a device measures facts about its hardware and its surroundings and sends one HMAC per fact, keyed with a secret
 //! that stays on the device
-//! 
+//!
 //! a server can then tell whether two reports come from the same hardware in the same
 //! place without learning any of the measured values, and without being able to link two devices
 //!

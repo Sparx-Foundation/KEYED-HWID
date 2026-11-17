@@ -8,7 +8,8 @@ each. The server compares reports of the same device part by part. It can tell t
 moved, or that two different machines are reporting under one identity, but it never sees a measured value. Digests
 from different devices cannot be correlated.
 
-The crate does no I/O. Collecting values is left to the device and storing reports to the server.
+> [!NOTE]  
+> The crate does no I/O.
 
 ## Example
 
@@ -53,12 +54,29 @@ Two part lists describe the same hardware or place if at least `min_matching` pa
 parts of the shorter list if it has fewer. `judge` compares a new report with earlier ones of the same identity
 and returns a `Signal` for:
 
-- `two_devices`: hardware that does not match a report from the last 24 hours
+- `forked`: a rolling token that is not newer than one already presented (see below)
+- `two_devices`: hardware that does not match a report from the last 24 hours, or that differs in an anchor part
+- `withheld`: fewer hardware parts than `min_matching` after recent reports had enough
 - `two_places`: a return to an earlier place within 24 hours after a different one (A, B, A)
+- `hardware_churn`: more than 3 distinct hardware sets within 30 days, or a return to an earlier hardware set after
+  a different one (A, B, A); e.g. a licence alternated between machines more than 24 hours apart, or a device whose
+  key keeps being wiped
 - `two_versions`: a version older than one reported within the last hour
 
 Replacing a single component, a new router, moving and updating do not produce a signal. The thresholds are
 configurable through `Rules`.
+
+`Rules::anchors` names hardware labels that must match whenever both reports hold them. Use it for values that are
+attested or hard to forge, such as a digest of the TPM endorsement key, so that a spoofer cannot keep the easy parts
+and swap the rest.
+
+## Rolling tokens
+
+Digests are static, so a copied identity can replay them exactly. To catch that, hand the device a fresh random
+token with every accepted report, remember which sequence number it belongs to, and require it with the next report.
+Store the sequence number in `Report::seq`. Two devices sharing one identity sooner or later present the same token
+twice and `judge` returns `forked`. The token reveals nothing about the hardware.
+
 
 ## Scope
 
