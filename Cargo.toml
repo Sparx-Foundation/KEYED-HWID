@@ -9,6 +9,7 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["hwid", "fingerprint", "privacy", "clone-detection", "hmac"]
 categories = ["cryptography", "authentication"]
+publish = ["crates-io"]
 
 [dependencies]
 base64 = "0.23"
