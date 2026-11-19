@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Privacy-preserving hardware ids from keyed per-property digests"
+repository = "https://github.com/Sparx-Foundation/KEYED-HWID"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["hwid", "fingerprint", "privacy", "clone-detection", "hmac"]
